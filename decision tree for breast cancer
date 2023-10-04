@@ -1,0 +1,241 @@
+#import libraries 
+import numpy  # Import the numpy library for numerical operations.
+import pandas  # Import the pandas library for data manipulation and analysis.
+import random  # Import the random library is used to randomly select a subset of elements from a list
+import time    # Import the time library for working with time-related functions.
+
+# A function for splitting a DataFrame into training and testing sets.
+def trainTestSplit(dataFrame, testSize):
+    if isinstance(testSize, float):
+        testSize = round(testSize * len(dataFrame)) # Check if testSize is a float and convert it to the corresponding integer number of samples.
+    indices = dataFrame.index.tolist()  # Get the list of indices from the DataFrame.
+    testIndices = random.sample(population = indices, k = testSize)  # Randomly select 'testSize' indices from the list without replacement.
+    dataFrameTest = dataFrame.loc[testIndices]  # Create a new DataFrame 'dataFrameTest' containing the selected test data.
+    dataFrameTrain = dataFrame.drop(testIndices)  # Create a new DataFrame 'dataFrameTrain' by removing the test data from the original DataFrame.
+    return dataFrameTrain, dataFrameTest   # Return the training and testing DataFrames.
+
+# A function to check if a dataset is pure, meaning all its target values are the same.
+def checkPurity(data): # Check if there is only one unique value in the last column (target column) of the dataset.
+    if len(numpy.unique(data[:, -1])) == 1:
+        return True     # If there's only one unique value, the dataset is pure, and we return True.
+    else:
+        return False      # If there are multiple unique values in the last column, the dataset is impure, and we return False.
+
+# A function to classify data based on the majority class in the target column.
+def classifyData(data):
+    uniqueClasses, uniqueClassesCounts = numpy.unique(data[:, -1], return_counts = True)     # Find unique classes and their respective counts in the target column.
+    return uniqueClasses[uniqueClassesCounts.argmax()]      # Return the class with the highest count as the classification result.
+
+# A function to find potential split points for decision tree-based algorithms.
+def getPotentialSplits(data, randomAttributes):
+    potentialSplits = {}  # Initialize an empty dictionary to store potential splits.
+    _, columns = data.shape  # Get the number of rows and columns in the data.
+    columnsIndices = list(range(columns - 1))  # Create a list of column indices excluding the last column (assumed to be the target).
+    if randomAttributes != None and len(randomAttributes) <= len(columnsIndices): # Check if randomAttributes is not None and is a valid list of column indices.
+        columnsIndices = randomAttributes  # If valid, use the provided randomAttributes as column indices.
+
+    for column in columnsIndices: # Loop through the selected column indices.
+        values = data[:, column]  # Extract the values in the current column.
+        uniqueValues = numpy.unique(values)  # Find unique values in the column.
+        if len(uniqueValues) == 1:  # If there's only one unique value, the column cannot be split, so store it as is.
+            potentialSplits[column] = uniqueValues
+        else:
+            potentialSplits[column] = []  # Initialize an empty list for potential split points.
+            for i in range(len(uniqueValues)): # Loop through the unique values in the column.
+                if i != 0:
+                    currentValue = uniqueValues[i]  # Current unique value.
+                    previousValue = uniqueValues[i - 1]  # Previous unique value.
+                    potentialSplits[column].append((currentValue + previousValue) / 2)  # Calculate the midpoint between the current and previous unique values as a potential split point.
+    return potentialSplits  # Return the dictionary of potential splits.
+
+
+# A function to split data into two subsets based on a specified column and split value.
+def splitData(data, splitColumn, splitValue): 
+    splitColumnValues = data[:, splitColumn]    # Extract the values from the specified column.
+    return data[splitColumnValues <= splitValue], data[splitColumnValues > splitValue]  # Create two subsets: one with values less than or equal to the split value and another with values greater than the split value.
+
+# A function to calculate the entropy of a dataset's target variable.
+def calculateEntropy(data):
+    _, uniqueClassesCounts = numpy.unique(data[:, -1], return_counts=True) # Get the unique classes in the target variable and their respective counts.
+    probabilities = uniqueClassesCounts / uniqueClassesCounts.sum() # Calculate the probabilities of each unique class.
+    return sum(probabilities * -numpy.log2(probabilities)) # Compute and return the entropy using the formula for entropy.
+
+# A function to calculate the overall entropy resulting from a split.
+def calculateOverallEntropy(dataBelow, dataAbove):   
+    pDataBelow = len(dataBelow) / (len(dataBelow) + len(dataAbove))     # Calculate the probability of data points in the "dataBelow" subset.
+    pDataAbove = len(dataAbove) / (len(dataBelow) + len(dataAbove))     # Calculate the probability of data points in the "dataAbove" subset.
+    return pDataBelow * calculateEntropy(dataBelow) + pDataAbove * calculateEntropy(dataAbove) # Calculate and return the weighted sum of entropies of the two subsets.
+
+
+# A function to determine the best split for a dataset among potential splits.
+def determineBestSplit(data, potentialSplits, randomSplits=None):
+    overallEntropy = 9999  # Initialize a high initial value for overall entropy.
+    bestSplitColumn = 0    # Initialize variables to track the best split column and value.
+    bestSplitValue = 0
+    if randomSplits is None: # If randomSplits is not specified, perform an exhaustive search over potential splits.
+        for splitColumn in potentialSplits:  # Iterate over each potential split column.
+            for splitValue in potentialSplits[splitColumn]: # Iterate over each potential split value for the current column.
+                dataBelow, dataAbove = splitData(data, splitColumn, splitValue) # Split the data into two subsets based on the current split column and value.
+                currentOverallEntropy = calculateOverallEntropy(dataBelow, dataAbove)                # Calculate the overall entropy resulting from this split.
+                if currentOverallEntropy <= overallEntropy:                # If the current overall entropy is lower than the previous best,
+                    overallEntropy = currentOverallEntropy  # update the best split column and value.
+                    bestSplitColumn = splitColumn
+                    bestSplitValue = splitValue
+    else:        # If randomSplits is specified, perform a random search for the best split.
+        for i in range(randomSplits):
+            randomSplitColumn = random.choice(list(potentialSplits)) # Randomly select a split column and split value from the potential splits.
+            randomSplitValue = random.choice(potentialSplits[randomSplitColumn])
+            dataBelow, dataAbove = splitData(data, randomSplitColumn, randomSplitValue)  # Split the data into two subsets based on the random split column and value.
+            currentOverallEntropy = calculateOverallEntropy(dataBelow, dataAbove) # Calculate the overall entropy resulting from this random split.
+            if currentOverallEntropy <= overallEntropy: # If the current overall entropy is lower than the previous best,
+                overallEntropy = currentOverallEntropy            # update the best split column and value.
+                bestSplitColumn = randomSplitColumn
+                bestSplitValue = randomSplitValue
+   
+    return bestSplitColumn, bestSplitValue # Return the best split column and value found.
+
+
+# A function to build a decision tree for classification.
+def buildDecisionTree(dataFrame, currentDepth=0, minSampleSize=2, maxDepth=1000, randomAttributes=None, randomSplits=None):
+    # Check if it's the initial call to set global column headers and convert DataFrame to a NumPy array.
+    if currentDepth == 0:
+        global COLUMN_HEADERS
+        COLUMN_HEADERS = dataFrame.columns
+        data = dataFrame.values
+        # If randomAttributes is specified, select a random subset of column indices.
+        if randomAttributes is not None and randomAttributes <= len(COLUMN_HEADERS) - 1:
+            randomAttributes = random.sample(population=list(range(len(COLUMN_HEADERS) - 1)), k=randomAttributes)
+        else:
+            randomAttributes = None
+    else:
+        data = dataFrame    
+    # Check if a leaf node should be created due to purity, sample size, or max depth criteria.
+    if checkPurity(data) or len(data) < minSampleSize or currentDepth == maxDepth:
+        return classifyData(data)
+    else:
+        currentDepth += 1
+        # Get potential splits for the dataset.
+        potentialSplits = getPotentialSplits(data, randomAttributes)
+        # Determine the best split for the data.
+        splitColumn, splitValue = determineBestSplit(data, potentialSplits, randomSplits)
+        # Split the data into two subsets.
+        dataBelow, dataAbove = splitData(data, splitColumn, splitValue)
+        # Handle cases where one of the subsets is empty.
+        if len(dataBelow) == 0 or len(dataAbove) == 0:
+            return classifyData(data)
+        else:
+            # Create a decision tree node with a question and branches for yes and no answers.
+            question = str(COLUMN_HEADERS[splitColumn]) + " <= " + str(splitValue)
+            decisionSubTree = {question: []}
+            yesAnswer = buildDecisionTree(dataBelow, currentDepth, minSampleSize, maxDepth, randomAttributes, randomSplits)
+            noAnswer = buildDecisionTree(dataAbove, currentDepth, minSampleSize, maxDepth, randomAttributes, randomSplits)
+            # Handle cases where both branches have the same classification.
+            if yesAnswer == noAnswer:
+                decisionSubTree = yesAnswer
+            else:
+                decisionSubTree[question].append(yesAnswer)
+                decisionSubTree[question].append(noAnswer)
+            return decisionSubTree
+
+
+# A function to classify a sample using a decision tree.
+def classifySample(sample, decisionTree):
+    # Check if the decisionTree is a leaf node (a class label) or a decision node.
+    if not isinstance(decisionTree, dict):
+        return decisionTree
+    # Extract the question (decision) from the decisionTree.
+    question = list(decisionTree.keys())[0]
+    # Split the question into attribute and value parts.
+    attribute, value = question.split(" <= ")
+    # Check if the sample's attribute value satisfies the decision node's condition.
+    if sample[attribute] <= float(value):
+        # Recursively classify the sample using the left branch (true condition).
+        answer = decisionTree[question][0]
+    else:
+        # Recursively classify the sample using the right branch (false condition).
+        answer = decisionTree[question][1]
+    # Continue classification recursively until a leaf node (class label) is reached.
+    return classifySample(sample, answer)
+
+
+# A function to make predictions using a decision tree.
+def decisionTreePredictions(dataFrame, decisionTree):
+    # Apply the 'classifySample' function to each row of the DataFrame.
+    # 'axis=1' indicates that we're applying the function to rows, and 'args' passes the decision tree as an argument.
+    predictions = dataFrame.apply(classifySample, axis=1, args=(decisionTree,))
+    # Return the predictions made for each row in the DataFrame.
+    return predictions
+
+
+# A function to calculate the accuracy of predicted results compared to actual categories.
+def calculateAccuracy(predictedResults, category):
+    # Calculate whether each predicted result matches the given category.
+    resultCorrect = predictedResults == category
+    # Calculate the mean of correct results, which represents accuracy.
+    return resultCorrect.mean()
+
+# A function to print the decision tree structure with proper indentation.
+def printDecisionTree(decisionTree, indent=""):
+    if isinstance(decisionTree, dict):
+        # Extract the question (split condition) from the decisionTree dictionary.
+        question = list(decisionTree.keys())[0]
+        # Split the question into attribute and value parts.
+        attribute, value = question.split(" <= ")
+        # Print the question with appropriate indentation.
+        print(indent + "Is {} <= {}?".format(attribute, value))
+        # Recursively print the "Yes" and "No" branches of the decision tree.
+        print(indent + "  Yes -> ", end="")
+        printDecisionTree(decisionTree[question][0], indent + "  ")
+        print(indent + "  No -> ", end="")
+        printDecisionTree(decisionTree[question][1], indent + "  ")
+    else:
+        # If it's a leaf node, print the predicted class with proper indentation.
+        print(indent + "Predicted Class:", decisionTree)
+
+
+
+# Load the breast cancer dataset from a CSV file into a pandas DataFrame.
+dataFrame = pandas.read_csv("breast_cancer.csv")
+# Remove the 'id' column from the DataFrame.
+dataFrame = dataFrame.drop("id", axis=1)
+# Reorder the columns in the DataFrame to have the target variable as the last column.
+dataFrame = dataFrame[dataFrame.columns.tolist()[1:] + dataFrame.columns.tolist()[0:1]]
+# Split the DataFrame into training and testing sets, with a test size of 25%.
+dataFrameTrain, dataFrameTest = trainTestSplit(dataFrame, testSize=0.25)
+
+# Print a header for the decision tree analysis.
+print("Decision Tree - Breast Cancer Dataset")
+
+# Initialize variables for loop control and accuracy measurement.
+i = 1
+accuracyTrain = 0
+
+# Continue building decision trees until training accuracy reaches 100%.
+while accuracyTrain < 100:
+    # Record the start time for building a decision tree.
+    startTime = time.time()
+    # Build a decision tree with a specified maximum depth.
+    decisionTree = buildDecisionTree(dataFrameTrain, maxDepth=i)
+    # Calculate the time taken to build the decision tree.
+    buildingTime = time.time() - startTime
+    # Make predictions using the decision tree on the test dataset.
+    decisionTreeTestResults = decisionTreePredictions(dataFrameTest, decisionTree)
+    # Calculate the accuracy of the model on the test dataset.
+    accuracyTest = calculateAccuracy(decisionTreeTestResults, dataFrameTest.iloc[:, -1]) * 100
+    # Make predictions using the decision tree on the training dataset.
+    decisionTreeTrainResults = decisionTreePredictions(dataFrameTrain, decisionTree)
+    # Calculate the accuracy of the model on the training dataset.
+    accuracyTrain = calculateAccuracy(decisionTreeTrainResults, dataFrameTrain.iloc[:, -1]) * 100
+
+    # Print the results for the current decision tree model.
+    print("maxDepth = {}: ".format(i), end="")
+    print("accTest = {0:.2f}%, ".format(accuracyTest), end="")
+    print("accTrain = {0:.2f}%, ".format(accuracyTrain), end="")
+    print("buildTime = {0:.2f}s".format(buildingTime), end="\n")
+
+    # Print the structure of the decision tree model.
+    print("Decision Tree Model:")
+    printDecisionTree(decisionTree)
+
+    # Increment the depth for the next iteration.
+    i += 1
